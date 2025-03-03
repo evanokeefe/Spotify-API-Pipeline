@@ -13,11 +13,13 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the .env file into the container
 COPY .env /app/.env
 
-# Set environment variables from the .env file (optional, if you're not using dotenv in the script)
+# Set environment variables from the .env file
 ENV DB_NAME=${DB_NAME}
 ENV DB_USER_NAME=${DB_USER_NAME}
 ENV DB_PASSWORD=${DB_PASSWORD}
 ENV DB_HOST=${DB_HOST}
+ENV CLIENT_ID=${CLIENT_ID}
+ENV CLIENT_SECRET=${CLIENT_SECRET}
 
 # Run the Python script when the container starts
-CMD ["python", "local_function.py"]
+CMD ["python", "main.py"]

@@ -9,8 +9,8 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - terraform_network
+      - my_network
 
 networks:
-  terraform_network:
+  my_network:
     driver: bridge
