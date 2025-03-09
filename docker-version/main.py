@@ -3,112 +3,137 @@ import json
 from urllib.parse import urlencode
 import os
 import logging
-import psycopg2  # type: ignore # Package used for interacting with PostgreSQL db
-from dotenv import load_dotenv  # Import dotenv to load environment variables
+import psycopg2
+from dotenv import load_dotenv
+import time
+from datetime import datetime
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-logger = logging.getLogger()
-logger.setLevel('INFO')
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Fetching environment variables from .env file
+# Fetch environment variables
 SPOTIFY_CLIENT_ID = os.getenv('SPOTIFY_CLIENT_ID')
 SPOTIFY_CLIENT_SECRET = os.getenv('SPOTIFY_CLIENT_SECRET')
 SPOTIFY_REFRESH_TOKEN = os.getenv('SPOTIFY_REFRESH_TOKEN')
+SPOTIFY_REDIRECT_URI = os.getenv('SPOTIFY_REDIRECT_URI')
 DB_HOST = os.getenv('DB_HOST')
 DB_NAME = os.getenv('DB_NAME')
 DB_USER_NAME = os.getenv('DB_USER_NAME')
 DB_USER_PASSWORD = os.getenv('DB_USER_PASSWORD')
 
-def lambda_handler(event, context):
-    """Retrieve the user's recent listening history from Spotify and store it in a PostgreSQL database."""
-    # Initialize a PoolManager instance
-    http = urllib3.PoolManager()
+def create_table_if_not_exists(cur):
+    """Creates the listening_history table if it doesn't exist."""
+    logger.info("Checking if the table exists and creating it if not.")
+    create_table_query = """
+    CREATE TABLE IF NOT EXISTS listening_history (
+        track_uri TEXT,
+        track_name TEXT,
+        artist_name TEXT,
+        album_name TEXT,
+        played_at TIMESTAMP PRIMARY KEY,
+        ms_played INT,
+        popularity INT
+    );
+    """
+    cur.execute(create_table_query)
+    logger.info("Checked for table existence and created it if necessary.")
 
-    # Define the URL for the token refresh endpoint
+def get_spotify_access_token():
+    """Fetches a new Spotify access token using the refresh token."""
     url = 'https://accounts.spotify.com/api/token'
-
-    # Define the headers
-    headers = {
-        'Content-Type': 'application/x-www-form-urlencoded'
-    }
-
-    # Define the payload with the required parameters
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
     payload = {
         'client_id': SPOTIFY_CLIENT_ID,
         'client_secret': SPOTIFY_CLIENT_SECRET,
         'refresh_token': SPOTIFY_REFRESH_TOKEN,
         'grant_type': 'refresh_token'
     }
+    
+    http = urllib3.PoolManager()
+    response = http.request('POST', url, body=urlencode(payload), headers=headers)
 
-    # Encode the payload
-    encoded_payload = urlencode(payload)
+    if response.status != 200:
+        logger.error(f"Failed to get access token: {response.data.decode('utf-8')}")
+        return None
 
-    # Make the POST request
-    response = http.request(
-        'POST',
-        url,
-        body=encoded_payload,
-        headers=headers
-    )
-    # Parse the response
-    response_data = json.loads(response.data.decode('utf-8'))
-    access_token = response_data['access_token']
+    return json.loads(response.data.decode('utf-8')).get('access_token')
 
-    # Retrieve the recently played tracks
-    response = http.request(
-        "GET",
-        "https://api.spotify.com/v1/me/player/recently-played?limit=50",
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        },
-    )
+def get_recent_tracks(access_token):
+    """Retrieves the user's recent listening history from Spotify."""
+    url = "https://api.spotify.com/v1/me/player/recently-played?limit=50"
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
 
-    # Parse the response to get the recently played tracks
-    results = json.loads(response.data.decode('utf-8'))
+    http = urllib3.PoolManager()
+    response = http.request("GET", url, headers=headers)
 
-    # Establishing connection to the PostgreSQL database
+    if response.status != 200:
+        logger.error(f"Failed to retrieve tracks: {response.data.decode('utf-8')}")
+        return None
+
+    return json.loads(response.data.decode('utf-8'))
+
+def store_tracks_to_db(tracks):
+    """Stores track data in a PostgreSQL database."""
+    if not tracks:
+        logger.warning("No tracks to store.")
+        return
+
     try:
-        conn = psycopg2.connect(
-            host=DB_HOST,
-            database=DB_NAME,
-            user=DB_USER_NAME,
-            password=DB_USER_PASSWORD,
-            port='5432'
-        )
-        cur = conn.cursor()
-    except Exception as e:
-        logger.error(f"Error connecting to PostgreSQL: {str(e)}")
-        return {"statusCode": 500, "body": json.dumps("Failed to connect to database")}
+        with psycopg2.connect(
+            host=DB_HOST, database=DB_NAME, user=DB_USER_NAME, password=DB_USER_PASSWORD, port='5432'
+        ) as conn:
+            with conn.cursor() as cur:
+                # Ensure table exists before inserting data
+                create_table_if_not_exists(cur)
 
-    tracks_count = 0
-    for track in results["items"]:
-        track_uri = track["track"]["uri"]
-        track_name = track["track"]["name"]
-        album_name = track["track"]["album"]["name"]
-        artist_name = track["track"]["artists"][0]["name"]
-        played_at = track["played_at"]
-        ms_played = track["track"]["duration_ms"]
-        popularity = track["track"]["popularity"]
+                batch = []
+                for track in tracks["items"]:
+                    batch.append((
+                        track["track"]["uri"],
+                        track["track"]["name"],
+                        track["track"]["artists"][0]["name"],
+                        track["track"]["album"]["name"],
+                        track["played_at"],
+                        track["track"]["duration_ms"],
+                        track["track"]["popularity"]
+                    ))
+
+                if batch:
+                    cur.executemany(
+                        """INSERT INTO listening_history (track_uri, track_name, artist_name, album_name, played_at, ms_played, popularity)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (played_at) DO NOTHING""",
+                        batch
+                    )
+                    logger.info(f"Inserted {len(batch)} tracks into the database.")
+    except Exception as e:
+        logger.error(f"Error storing tracks to database: {str(e)}")
+
+def main():
+    """Main function to fetch tracks and store them in the database."""
+    while True:
+        logger.info(f"Fetching Spotify tracks at {datetime.now()}")
+
+        access_token = get_spotify_access_token()
+        if not access_token:
+            logger.error("Failed to get Spotify access token.")
+            time.sleep(900)  # Wait 15 minutes before retrying
+            continue
+
+        tracks = get_recent_tracks(access_token)
+        if not tracks:
+            logger.error("Failed to fetch recent tracks.")
+            time.sleep(900)  # Wait 15 minutes before retrying
+            continue
+
+        store_tracks_to_db(tracks)
         
-        try:
-            cur.execute(
-                """INSERT INTO listening_history (track_uri, track_name, artist_name, album_name, played_at, ms_played, popularity)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (played_at) DO NOTHING""",
-                (track_uri, track_name, artist_name, album_name, played_at, ms_played, popularity),
-            )
-            tracks_count += 1
-            logger.info(f"Added {track_name} by {artist_name} to Postgres DB")
-        except Exception as e:
-            logger.error(f"Error inserting track {track_name} by {artist_name}: {str(e)}")
+        logger.info("Waiting 15 minutes before the next batch.")
+        time.sleep(900)  # Sleep for 15 minutes
 
-    # Commit and close the connection
-    try:
-        conn.commit()
-    except Exception as e:
-        logger.error(f"Error committing to database: {str(e)}")
-    finally:
-        conn.close()
+if __name__ == "__main__":
+    main()
