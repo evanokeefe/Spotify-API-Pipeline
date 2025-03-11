@@ -29,13 +29,15 @@ def create_table_if_not_exists(cur):
     """Creates the listening_history table if it doesn't exist."""
     create_table_query = """
     CREATE TABLE IF NOT EXISTS listening_history (
-        track_uri TEXT,
+        played_at TIMESTAMPTZ,
+        track_id TEXT,
         track_name TEXT,
+        artist_id TEXT,
         artist_name TEXT,
         album_name TEXT,
-        played_at TIMESTAMP PRIMARY KEY,
         ms_played INT,
-        popularity INT
+        popularity INT,
+        PRIMARY KEY (played_at,track_id)
     );
     """
     cur.execute(create_table_query)
@@ -91,8 +93,9 @@ def store_tracks_to_db(tracks):
                 batch = []
                 for track in tracks["items"]:
                     batch.append((
-                        track["track"]["uri"],
+                        track["track"]["id"],
                         track["track"]["name"],
+                        track["track"]["artists"][0]["id"],
                         track["track"]["artists"][0]["name"],
                         track["track"]["album"]["name"],
                         track["played_at"],
@@ -102,9 +105,9 @@ def store_tracks_to_db(tracks):
 
                 if batch:
                     cur.executemany(
-                        """INSERT INTO listening_history (track_uri, track_name, artist_name, album_name, played_at, ms_played, popularity)
-                           VALUES (%s, %s, %s, %s, %s, %s, %s)
-                           ON CONFLICT (played_at) DO NOTHING""",
+                        """INSERT INTO listening_history (track_id, track_name, artist_id, artist_name, album_name, played_at, ms_played, popularity)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (played_at, track_id) DO NOTHING""",
                         batch
                     )
                     logger.info(f"Inserted {len(batch)} tracks into the database.")
