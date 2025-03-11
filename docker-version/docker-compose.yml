@@ -8,10 +8,11 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     labels:
-      ofelia.job-run.spotify-listener.schedule: "@hourly"
+      ofelia.job-run.spotify-listener.schedule: "@every 10m"
       ofelia.job-run.spotify-listener.container: "spotify-listener"
 
   spotify-listener:
+    container_name: spotify-listener
     build: .
     depends_on:
       - postgres

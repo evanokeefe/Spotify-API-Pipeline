@@ -60,9 +60,9 @@ def get_spotify_access_token():
 
     return json.loads(response.data.decode('utf-8')).get('access_token')
 
-def get_recent_tracks(access_token):
+def get_recent_tracks(access_token,track_count=50):
     """Retrieves the user's recent listening history from Spotify."""
-    url = "https://api.spotify.com/v1/me/player/recently-played?limit=50"
+    url = f"https://api.spotify.com/v1/me/player/recently-played?limit={track_count}"
     headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
 
     http = urllib3.PoolManager()
@@ -120,7 +120,7 @@ def main():
         logger.error("Failed to get Spotify access token.")
         return
 
-    tracks = get_recent_tracks(access_token)
+    tracks = get_recent_tracks(access_token,10)
     if not tracks:
         logger.error("Failed to fetch recent tracks.")
         return
