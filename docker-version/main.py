@@ -27,7 +27,6 @@ DB_USER_PASSWORD = os.getenv('DB_USER_PASSWORD')
 
 def create_table_if_not_exists(cur):
     """Creates the listening_history table if it doesn't exist."""
-    logger.info("Checking if the table exists and creating it if not.")
     create_table_query = """
     CREATE TABLE IF NOT EXISTS listening_history (
         track_uri TEXT,
@@ -40,7 +39,6 @@ def create_table_if_not_exists(cur):
     );
     """
     cur.execute(create_table_query)
-    logger.info("Checked for table existence and created it if necessary.")
 
 def get_spotify_access_token():
     """Fetches a new Spotify access token using the refresh token."""
@@ -115,25 +113,19 @@ def store_tracks_to_db(tracks):
 
 def main():
     """Main function to fetch tracks and store them in the database."""
-    while True:
-        logger.info(f"Fetching Spotify tracks at {datetime.now()}")
+    logger.info(f"Fetching Spotify tracks at {datetime.now()}")
 
-        access_token = get_spotify_access_token()
-        if not access_token:
-            logger.error("Failed to get Spotify access token.")
-            time.sleep(900)  # Wait 15 minutes before retrying
-            continue
+    access_token = get_spotify_access_token()
+    if not access_token:
+        logger.error("Failed to get Spotify access token.")
+        return
 
-        tracks = get_recent_tracks(access_token)
-        if not tracks:
-            logger.error("Failed to fetch recent tracks.")
-            time.sleep(900)  # Wait 15 minutes before retrying
-            continue
-
-        store_tracks_to_db(tracks)
-        
-        logger.info("Waiting 15 minutes before the next batch.")
-        time.sleep(900)  # Sleep for 15 minutes
+    tracks = get_recent_tracks(access_token)
+    if not tracks:
+        logger.error("Failed to fetch recent tracks.")
+        return
+    
+    store_tracks_to_db(tracks)
 
 if __name__ == "__main__":
     main()

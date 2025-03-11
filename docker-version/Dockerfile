@@ -21,9 +21,5 @@ ENV DB_HOST=${DB_HOST}
 ENV CLIENT_ID=${CLIENT_ID}
 ENV CLIENT_SECRET=${CLIENT_SECRET}
 
-# Download and install wait-for-it
-RUN wget https://raw.githubusercontent.com/vishnubob/wait-for-it/master/wait-for-it.sh && \
-    chmod +x wait-for-it.sh
-
 # Run the Python script when the container starts
-CMD ["./wait-for-it.sh", "postgres:5432", "--", "python", "main.py"]
+CMD ["python", "main.py"]
